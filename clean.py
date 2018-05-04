@@ -7,7 +7,6 @@ Created on Thu May  3 15:56:39 2018
 """
 
 import numpy as np
-import pandas as pd
 
 
 
@@ -26,7 +25,7 @@ def removeNaNColumns(data):
 
 
 """
-functions to discover effective data types
+functions to discover if conversions of type will preserve informaion
 """
 ## returns boolean array describing which variables are boolean
 def isBool(df, varList = None):
@@ -54,6 +53,7 @@ def optimalIntType(col):
     bound = max(abs(m), abs(M))
     signed = False if m >= 0 else True
     
+    # cutoffs found online
     if signed:
         if bound <= 128:
             dtype = np.dtype('int8')
