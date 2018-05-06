@@ -50,7 +50,8 @@ class Data(object):
         self.refresh()
         
         
-    def refresh(self, randomize = True):
+    def refresh(self, seed = None, randomize = True):
+        np.random.seed(seed=seed)
         df = self.df.sample(frac = 1.) if randomize else self.df
         self.train, self.val, self.test = {}, {}, {}
         for key in self.info:
