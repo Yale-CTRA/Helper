@@ -8,11 +8,12 @@ Created on Fri May  4 15:12:08 2018
 
 import numpy as np
 import pandas as pd
-from copy import copy
+from copy import deepcopy, copy
 import warnings
+import os
 import sys
-path = '/home/aditya/Projects/'
-sys.path.append(path)
+root = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..'))
+sys.path.append(root)
 from Helper.preprocessing import SkewCorrection
 from sklearn.preprocessing import Imputer, StandardScaler
 
@@ -43,19 +44,19 @@ class Data(object):
     
     def setSplit(self, split):
         assert sum(split) == 1
-        self.trainIndex = self.buildIndexer(start = 0, stop = split[0])
-        self.valIndex = self.buildIndexer(start = split[0], stop = sum(split[:2]))
-        self.testIndex = self.buildIndexer(start = sum(split[:2]), stop = 1)
+        self.__trainIndex = self.buildIndexer(start = 0, stop = split[0])
+        self.__valIndex = self.buildIndexer(start = split[0], stop = sum(split[:2]))
+        self.__testIndex = self.buildIndexer(start = sum(split[:2]), stop = 1)
         self.refresh()
         
         
     def refresh(self, randomize = True):
-        df = copy(self.df.sample(frac = 1.) if randomize else self.df)
+        df = self.df.sample(frac = 1.) if randomize else self.df
         self.train, self.val, self.test = {}, {}, {}
         for key in self.info:
-            self.train[key] = df.loc[self.trainIndex, self.info[key]].values
-            self.val[key] = df.loc[self.valIndex, self.info[key]].values
-            self.test[key] = df.loc[self.testIndex, self.info[key]].values
+            self.train[key] = df.loc[self.__trainIndex, self.info[key]].values
+            self.val[key] = df.loc[self.__valIndex, self.info[key]].values
+            self.test[key] = df.loc[self.__testIndex, self.info[key]].values
             
             
 
@@ -170,17 +171,6 @@ class UpliftDataContainer(object):
     def __set_predictor_groups(self):
         self.predictors_bool = np.array(self.vars_bool)[[var in self.predictors for var in self.vars_bool]]
         self.predictors_float = np.array(self.vars_float)[[var in self.predictors for var in self.vars_float]]
-        
-    
-    def __pca(self):
-        pca = PCA()
-        temp1 = pca.fit_transform(self.train[['sbp', 'dbp']].values)
-        self.train['sbp_pca'] = temp1[:,0]
-        self.train['dbp_pca'] = temp1[:,1]
-        
-        temp2 = pca.transform(self.test[['sbp', 'dbp']].values)
-        self.test['sbp_pca'] = temp2[:,0]
-        self.test['dbp_pca'] = temp2[:,1]
         
 #    def __upsample(self, train, num_times):
 #        train_y = train.ix[train[self.targets].values[:,0] == 1, :]

@@ -7,19 +7,30 @@ Created on Thu May  3 15:58:29 2018
 """
 
 import pickle
+import os
 import numpy as np
 
 
 """
 Wrappers for pickling.  Just makes saving/loading objects a little less verbose
 """
-def save(obj, file):
-    with open(file + '.pickle', 'wb') as output:
+def save(obj, loc, name):
+    name += '.pickle'
+    with open(os.path.join(loc, name), 'wb') as output:
         pickle.dump(obj, output, -1)
-def load(file):
-    with open(file + '.pickle', 'rb') as input:
+def load(loc, name):
+    name += '.pickle'
+    with open(os.path.join(loc, name), 'rb') as input:
         obj = pickle.load(input)
         return obj
+    
+# converts time from float in hours to str
+# in form '6 hrs 12 mins'
+def getHrsMins(time):
+    hours = int(np.floor(time))
+    minutes = np.round(60*(time-hours), decimals = 1)
+    text = str(hours) + ' hrs ' + str(minutes) + ' mins'
+    return text
 
 
 
