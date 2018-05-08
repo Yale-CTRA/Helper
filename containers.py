@@ -30,7 +30,7 @@ class Data(object):
     Caveats: If imputation or scaling is necessary, it must be done beforehand on whole dataset (biased)
     """
     def __init__(self, df, info, split):
-        self.df = df.astype(np.float16)
+        self.df = df.astype(np.float32)
         self.m = len(df)
         self.info = info
         self.setSplit(split) # also refreshes

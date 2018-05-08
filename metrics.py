@@ -18,7 +18,7 @@ Add logrank estimator down here when you find the file
 
 
 # kaplan-meier nonparametric estimator for survival curve
-def KM_Estimator(Y, T, plot = False):
+def KM_Estimator(Y, T, weighted = True, plot = False):
     index = np.argsort(T)
     Y, T = Y[index], T[index]
     times = np.unique(T)
@@ -26,13 +26,21 @@ def KM_Estimator(Y, T, plot = False):
     m = len(times)
     n = np.zeros(m)
     d = np.zeros(m)
+    c = np.zeros(m)
     
     for i in range(m):
-        n[i] = np.sum(T >= times[i])
+        select = T >= times[i]
+        n[i] = np.sum(select)
         select = T == times[i]
-        d[i] = np.sum(Y[select])
+        selected = Y[select]
+        d[i] = np.sum(selected)
+        c[i] = np.sum(1-selected)
     
-    S = np.cumprod(1-d/n)
+    if weighted:
+        w = (n-c)/n
+    else:
+        w = np.ones(len(n))
+    S = np.cumprod(w*(1-d/n))
     
     if plot:
         plt.plot(np.concatenate([np.zeros(1), times]), np.concatenate((np.ones(1), S)))
@@ -60,7 +68,7 @@ def RMST(Y, T, tau = None):
 # plots those who fall in aligned-recommendation group for 4 strategies:
 # treat all, treat no one, randomly treat, and targeted treat (determined by U)
 # returns difference in area between treat intelligently and randomly as metric
-def strategyGraph(U, Y, T, A, tau, bins = 10, plot = False):
+def strategyGraph(U, Y, T, A, tau, bins = 10, plot = False, save = None):
     treated = A == 1    
     
     ##########################
@@ -85,7 +93,7 @@ def strategyGraph(U, Y, T, A, tau, bins = 10, plot = False):
     ##### PLOT and RETURN ######
 
     x = np.arange(0, 100 + binSize, binSize)/100  # x-axis: [0,...,1]
-    if plot:            
+    if plot or save is not None:            
         fig, ax = plt.subplots()
         
         # plot targeted strategy
@@ -104,7 +112,10 @@ def strategyGraph(U, Y, T, A, tau, bins = 10, plot = False):
         ax.set_xlabel('Fraction of Population Recommended for Treatment', fontsize=18)
         ax.set_ylabel('Resticted Mean Survival Time (Years)', fontsize=18)
         ax.tick_params(labelsize = 14)
-        plt.show()
+        if plot:
+            plt.show()
+        if save is not None:
+            plt.savefig(save)
     
     # return metric
     randomArea = np.trapz([treatmentPerformance, controlPerformance], [0, 1])
