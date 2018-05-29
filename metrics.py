@@ -17,7 +17,7 @@ Add logrank estimator down here when you find the file
 """
 
 
-# kaplan-meier nonparametric estimator for survival curve
+# normal kaplan-meier nonparametric estimator for survival curve
 def KM_Estimator(Y, T, weighted = True, plot = False):
     index = np.argsort(T)
     Y, T = Y[index], T[index]
@@ -37,10 +37,11 @@ def KM_Estimator(Y, T, weighted = True, plot = False):
         c[i] = np.sum(1-selected)
     
     if weighted:
-        w = (n-c)/n
+        #w = (n-c)/n
+        w = getSurvivalStats(1-Y, T, times)
     else:
         w = np.ones(len(n))
-    S = np.cumprod(w*(1-d/n))
+    S = w*np.cumprod((1-d/n))
     
     if plot:
         plt.plot(np.concatenate([np.zeros(1), times]), np.concatenate((np.ones(1), S)))
@@ -48,11 +49,62 @@ def KM_Estimator(Y, T, weighted = True, plot = False):
     return times, S
 
 
+def getSurvivalStats(Y, T, times):
+    m = len(times)
+    n, d = np.ones(m, dtype = np.int32), np.zeros(m, dtype = np.int32)
+    for i in range(m):
+        select = T >= times[i]
+        n[i] = np.sum(select)
+        select = T == times[i]
+        selected = Y[select]
+        d[i] = np.sum(selected)
+    S = np.cumprod(1 - d/n)
+    return S
+
+## weighted estimator for difference of integration over 2 sample KM estimator
+def WKM_Statistic(Y, T, A, scale = True):
+    index = np.argsort(T)
+    Y, T, A = Y[index], T[index], A[index]
+    not_A = np.logical_not(A)
+    
+    Y_1, Y_0 = Y[A], Y[not_A]
+    T_1, T_0 = T[A], T[not_A]
+    times = np.unique(T)
+    minLastT = np.min([T_1[-1], T_0[-1]])
+    times = times[:np.where(times==minLastT)[0][0]]
+
+    
+    N_1, N_0 = len(Y_1), len(Y_0)
+    N = N_1 + N_0
+    p_1, p_0 = N_1/N, N_0/N
+    
+    C_1, C_0 = getSurvivalStats(1-Y_1, T_1, times), getSurvivalStats(1-Y_0, T_0, times)
+    W = C_1*C_0/(p_1*C_1 + p_0*C_0)
+    
+    # get mu
+    S_1, S_0 = getSurvivalStats(Y_1, T_1, times), getSurvivalStats(Y_0, T_0, times)
+    deltas = times[1:] - times[:-1]
+    U = np.sum(W[:-1]*(S_1[:-1] - S_0[:-1])*deltas)
+    
+#    # get variance
+#    S = np.concatenate([np.array([1]), getSurvivalStats(Y, T, times)])
+#    np.cumsum((W*S[:-1])[::-1])[::-1]
+    if scale:
+        return np.sqrt(N_1*N_0/N)*U
+    else:
+        return U
+    
+    
+    
+    
+    
+
+
 
 
 # restricted mean survival time; tau is restriction time
-def RMST(Y, T, tau = None):
-    times, S = KM_Estimator(Y, T)
+def RMST(Y, T, tau = None, weighted = False):
+    times, S = KM_Estimator(Y, T, weighted = weighted)
     if tau is None:
         tau = np.sort(T)[-1]
     else:
@@ -76,7 +128,9 @@ def strategyGraph(U, Y, T, A, tau, bins = 10, plot = False, save = None):
     
     # Calculate Restricted Mean Survival Times
     treatmentPerformance = RMST(Y[treated], T[treated], tau)
-    controlPerformance = RMST(Y[~treated], T[~treated], tau)
+    controlPerformance = RMST(Y[~treated], T[~treated], tau)   
+#    treatmentPerformance = WKM_Statistic(Y, T, treated)
+#    controlPerformance = - treatmentPerformance
     
     # rate in recommended group at different decision boundaries for targeted treatment strategy
     binSize = 100/bins
@@ -85,6 +139,7 @@ def strategyGraph(U, Y, T, A, tau, bins = 10, plot = False, save = None):
     for i, threshold, in enumerate(decisionBoundaries): # rec treat all -> rec treat no one
         treatSelector = U >= decisionBoundaries[i]
         recSelector = np.logical_or(np.logical_and(treatSelector, treated), np.logical_and(~treatSelector, ~treated))
+        #recPerformances[i+1] = WKM_Statistic(Y, T, recSelector)
         recPerformances[i+1] = RMST(Y[recSelector], T[recSelector], tau)
     recPerformances[0] = treatmentPerformance # left boundary
     recPerformances[-1] = controlPerformance # right boundary
