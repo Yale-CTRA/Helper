@@ -111,16 +111,16 @@ def mixed2float(data):
             val = float(data[i])
             newData[i] = val
         except ValueError:     # some quirk with string
-            # checks for large number commas comparisons for v small and large measurements
-            string = re.sub('[ ,+><=]', '', data[i].lower())
+            # checks for large number commas, comparisons for v small and large measurements, etc.
+            string = re.sub('[ ,+>=]', '', data[i].lower()).replace('..','.')
             # checks for dashes to indicate ranges (e.g. 10-20)
             dashLoc = string.find('-')
             try:
-                if string == 'none':     # sometimes 0 is coded as such
+                if string in ['none', 'notdetected'] or '<' in string: # all less thans are 0
                     newData[i] = 0
                 elif string == 'many':  # mark to impute largest value later
                     manyMarker[i] = True
-                elif dashLoc != -1:      # check for dashes
+                elif dashLoc != -1:      # check for dashes; if so, average interval
                     val = (float(string[:dashLoc]) + float(string[dashLoc+1:]))/2
                     newData[i] = val
                 else:           # can string be converted with just bad chars removed?
@@ -129,8 +129,9 @@ def mixed2float(data):
             except ValueError:      # no hope. code as NaN (e.g. cancelled, unavilable, etc.)
                 newData[i] = np.nan
     
-    maxVal = np.max(newData[np.isfinite(newData)])
-    newData[manyMarker] = maxVal
+    if np.any(manyMarker):
+        maxVal = np.max(newData[np.isfinite(newData)])
+        newData[manyMarker] = maxVal
     return newData
 
 
@@ -141,14 +142,20 @@ def mixedCategoricalClean(data):
     units, capitalization, etc...
     """
     m = len(data)
+    newData = np.empty(len(data), dtype = data.dtype)
+    newData.fill(np.nan)
     data = data.astype(np.str)
     select = ~(data == 'nan')
     for i in range(m):
         if select[i]:
             # reduces number of unique categories by creating more regularity in names
-            string = re.sub('[><=,]', '', data[i].lower().replace('.0', '')).replace('..','.')
-            data[i] = re.sub('\((.*?)\)','', string).replace('mg/dl', '').strip()
-    return data
+            # anything with a less than sign is assume to be negative
+            if '<' in data[i]:
+                newData[i] = 'negative'
+            else:
+                string = re.sub('[>=,]', '', data[i].lower())
+                newData[i] = re.sub('\((.*?)\)','', string).replace('mg/dl', '').strip()
+    return newData
     
 
 def mixedCategoricalUnique(data):

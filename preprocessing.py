@@ -17,7 +17,7 @@ root = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__))
 #root = os.path.join(os.path.expanduser('~'), 'Documents', 'Projects')
 sys.path.append(root)
 
-from clean import mixedCategoricalClean, mixed2float
+from Helper.clean import mixedCategoricalClean, mixed2float
 
 from sklearn.preprocessing import StandardScaler
 
@@ -92,63 +92,6 @@ def stringCollapse(data, collapseList, newVal, inverse = False):
     data[select] = newVal
     return data
 
-
-
-def fixUrineVars(data):
-    m = len(data)
-    conversionDict = {'none': 'negative', 'few': 'trace', 'small': '1+', 'positive': '1+',
-                  'moderate': '2+', 'large': '3+', '4+': '3+', 'many': '3+'}
-    codings = ['negative', 'trace', '1+', '2+', '3+']
-    basicConversion = lambda val: val if val in codings else conversionDict[val]
-    
-
-        
-    # conversionUrineVars= ['uabili', 'uaprotein', 'uaglucose', 'uawbcs', 'uarbcs', 'uahycasts',
-    #             'uanitrite', 'uaketones', 'ualeukest']
-    # otherUrineVars = ['uaclarity', 'uacolor']
-    
-    # first do conversionUrineVars
-    if 'uabili' in data.columns:
-        col = data['uabili'].values.astype(np.str)
-        select = ~(col == 'nan')
-        new = np.empty(m, dtype = np.str)
-        for i in range(m):
-            if select[i]:
-                try:
-                    val = basicConversion(col[i])
-                except KeyError:
-                    try:
-                        val = float(val)
-                        if val == 0:
-                            val = 'negative'
-                        elif val <= 0.2:
-                            val = 'trace'
-                        elif val <= 1:
-                            val = '1+'
-                        elif val <= 2:
-                            val = '2+'
-                        else:
-                            val = '3+'
-                    except ValueError:
-                        val = 'nan'
-    
-    
-    # now do otherUrineVars    
-    if 'uaclarity' in data.columns:
-        data['uaclarity'] = mixedCategoricalClean(data['uaclarity'].values)
-        data['uaclarity'] = stringCollapse(data['uaclarity'].values, ['clear'], 'cloudy', inverse = True)
-    
-    if 'uacolor' in data.columns:
-        data['uacolor'] = mixedCategoricalClean(data['uacolor'].values)
-        collapseList = ['yellow', 'colorless', 'pale yellow']
-        data['uacolor'] = stringCollapse(data['uacolor'].values, collapseList, 'normal')
-        data['uacolor'] = stringCollapse(data['uacolor'].values, ['normal'], 'abnormal', inverse = True)
-    
-    
-    return data
-    
-    
-    mixedCategorical(data[otherUrineVars[0]].values)
 
     
 ####################################################################################

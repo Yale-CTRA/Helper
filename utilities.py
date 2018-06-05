@@ -8,12 +8,13 @@ Created on Thu May  3 15:58:29 2018
 
 import pickle
 import os
+import pandas as pd
 import numpy as np
 
 
-"""
-Wrappers for pickling.  Just makes saving/loading objects a little less verbose
-"""
+
+## Wrappers for pickling.  Just makes saving/loading objects a little less verbose
+
 def save(obj, loc, name):
     name += '.pickle'
     with open(os.path.join(loc, name), 'wb') as output:
@@ -64,16 +65,35 @@ def showCoef(coef, predictors):
 
 
 
-
-
-"""
-Performs the standard class variable transormation, but with the option for soft targets (e.g. 0.05 or 0.95)
-Margin is how far to deviate from the hard targets 0/1
-Side is for when you only want to make a single class soft (such as minority class in imbalanced dataset) 
-"""       
-def classVariableTransform(Y, T, soft = False, margin = None, side = 'both'):
-    ## expects numpy arrays, returns numpy array of same type
+# saves a file of the unique values for the columns given in a dataset
+def saveUnique(data, names, folder, fileName, maxRecord = 1000):
+    df_unique = pd.DataFrame(np.empty((maxRecord, len(names)), dtype = np.dtype('O')),
+                             columns = names, index = np.arange(maxRecord))
     
+    df_counts = pd.DataFrame(np.empty((maxRecord, len(names)), dtype = np.int64),
+                             columns = names, index = np.arange(maxRecord))
+    
+    for var in names:
+        select = ~(data[var].astype(np.str) == 'nan')
+        vals, counts = np.unique(data[var].values[select], return_counts=False)
+        maxLen = min(len(vals), maxRecord)
+        sorter = np.argsort(counts)[::-1][:maxLen]
+        vals, counts = vals[sorter], counts[sorter]
+        loc = df_unique.columns.get_loc(var)
+        df_unique.iloc[:maxLen, loc] = vals
+        df_counts.iloc[:maxLen, loc] = counts
+        print(var)
+    df_unique.to_csv(os.path.join(folder, fileName + '_unique.csv'))
+    df_counts.to_csv(os.path.join(folder, fileName + '_counts.csv'))
+
+ 
+def classVariableTransform(Y, T, soft = False, margin = None, side = 'both'):
+    """
+    Performs the standard class variable transormation, but with the option for soft targets (e.g. 0.05 or 0.95)
+    Margin is how far to deviate from the hard targets 0/1
+    Side is for when you only want to make a single class soft (such as minority class in imbalanced dataset) 
+    """      
+    ## expects numpy arrays, returns numpy array of same type
     # make sure a margin is provided if we want soft targets
     if soft:
         assert margin
