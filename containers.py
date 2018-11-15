@@ -12,10 +12,150 @@ from copy import deepcopy, copy
 import warnings
 import os
 import sys
+from tqdm import tqdm
 root = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..'))
 sys.path.append(root)
+
 from Helper.preprocessing import SkewCorrection
 from sklearn.preprocessing import Imputer, StandardScaler
+
+
+
+class PanelIndexer(object):
+    def __init__(self, data, idname, timename, verbose = True):
+        self.data = data.sort_values([idname, timename])
+        self.data.set_index(idname, inplace = True, drop = False)
+        self.idname = idname
+        self.timename = timename
+        self.verbose = verbose
+        self.pIndex = self.getpIndex(self.data[self.idname].values)
+    
+    def getpIndex(self, data):
+        m = len(data)
+        X = np.zeros((len(np.unique(data)), 3), dtype = np.int64)
+        #fix boundaries
+        X[0,0] = 0
+        X[-1,1] = m
+        # do loop to record indices
+        counter = 0
+        current = data[0]
+        for i in range(1,m):
+            if data[i] != current:
+                current = data[i]
+                X[counter,1] = i
+                X[counter+1,0] = i
+                counter += 1
+        X[:,2] = X[:,1] - X[:,0]
+        return X
+    
+    def subset(self, select):
+        self.data = self.data.loc[select,:]
+        self.pIndex = self.getpIndex(self.data[self.idname].values) 
+    
+    
+    def create(self, func, ncols = 1, dtype = np.float64, by = 'row'):
+        assert by in ('encounter', 'row', 'panel')
+        shape = len(self.pIndex) if by == 'panel' else len(self.data)
+        shape = (shape, ncols) if ncols > 1 else shape
+        new = np.empty(shape, dtype = dtype)
+        if by == 'encounter':
+            for i in tqdm(range(len(self.pIndex))):
+                start, stop, length = self.pIndex[i,:]
+                new[start:stop] = func(self.data.iloc[start:stop,:])
+        elif by == 'row':
+            new[:] = func(self.data)
+        elif by == 'panel':
+            for i in tqdm(range(len(self.pIndex))):
+                start, stop, length = self.pIndex[i,:]
+                new[i] = func(self.data.iloc[start:stop,:])
+        return new
+    
+    def filter(self, keepFunc, by = 'row', exclude = False):
+        assert by in ('panel', 'row', 'encounter')
+        m0 = len(self.data) if by == 'row' else len(self.pIndex)
+        if by == 'panel':
+            func = lambda x: np.repeat(keepFunc(x), len(x))
+            select = self.create(func, dtype = np.bool, by = 'encounter')
+        elif by == 'encounter':
+            select = self.create(keepFunc, dtype = np.bool, by = 'encounter')
+        elif by == 'row':
+            select = keepFunc(self.data)
+            
+        select = np.logical_not(select) if exclude else select
+        self.subset(select)
+        
+        if self.verbose:
+            # print what occurred
+            if by == 'encounter':
+                m1 = self.countAllTrue(select)
+            elif by == 'panel':
+                m1 = len(self.pIndex)
+            else:
+                m1 = len(self.data)
+            nounDict = {'row': 'row', 'encounter': 'encounter', 'panel': 'encounter'}
+            verbDict = {'row': 'removed', 'encounter': 'shortened', 'panel': 'removed'}
+            print(m0-m1, nounDict[by] + 's', verbDict[by])
+            if by == 'encounter':
+                print(np.sum(~select), 'rows removed')
+    
+    def countAllTrue(self, select):
+        count = 0
+        for i in range(len(self.pIndex)):
+            start, stop, _ = self.pIndex[i,:]
+            count += np.all(select[start:stop])
+        return count
+        
+    def keepfirstN(self, N):
+        # returns first n encounters
+        return PanelIndexer(self.data.iloc[:self.pIndex[N-1,1],:], self.idname, self.timename)
+    
+    def split(self, percentage):
+        cutoff = self.pIndex[int(np.round(len(self.pIndex)*percentage)),0]
+        return (PanelIndexer(self.data.iloc[:cutoff,:], self.idname, self.timename),
+                PanelIndexer(self.data.iloc[cutoff:,:], self.idname, self.timename))
+
+    
+    def drop(self, labels, axis = 1):
+        self.data.drop(labels = labels, axis = axis, inplace = True)
+        
+    def impute(self, label):
+        avgSigma = np.nanmean(self.create(lambda x: np.nanmean(x[label].values),
+                                   dtype = np.float32, by = 'panel'))
+        select = np.isnan(self.data[label].values)
+        self.data.loc[select,label] = avgSigma
+        
+        if self.verbose:
+            print(len(self.pIndex) - self.countAllTrue(~select), 'encounters needed imputation')
+            print(np.sum(select), 'values imputed')
+    
+        
+    def __len__(self):
+        return len(self.pIndex)
+    
+    def __getitem__(self, key):
+        if type(key) is int:
+            start, stop, _ = self.pIndex[key,:]
+            return self.data.iloc[start:stop,:]
+        elif type(key) is slice:
+            pIndexSub = self.pIndex[key,:]
+            start, stop = pIndexSub[0,0], pIndexSub[-1,1]
+            return self.data.iloc[start:stop,:]
+        elif type(key) is str or list: 
+            return self.data[key]
+        else:
+            raise KeyError("Use a slice, int, or str as the key")
+    
+    def __setitem__(self, keys, values):
+        if type(keys) is list:
+            for i, name in enumerate(keys):
+                self.data[name] = values[:,i]
+        elif type(keys) is str:
+            self.data[keys] = values
+        else:
+            raise KeyError("Use a str or list of strings as the key")
+    
+
+
 
 
 class Data(object):

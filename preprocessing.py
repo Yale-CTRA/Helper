@@ -8,7 +8,8 @@ Created on Fri May  4 15:14:54 2018
 
 import numpy as np
 import pandas as pd
-from scipy.stats import skewtest, boxcox
+from scipy.stats import skewtest, boxcox, mode
+from tqdm import tqdm
 
 import os
 import sys
@@ -21,6 +22,76 @@ from Helper.clean import mixedCategoricalClean, mixed2float
 
 from sklearn.preprocessing import StandardScaler
 
+# assumes numpy array of all numerical types
+class Transformer(object):
+    def fit(self, data):
+        self.k = np.shape(data)[1]
+        self.hasMissing = np.zeros(self.k, dtype = np.bool)
+        self.valueExists = np.zeros(self.k, dtype = np.bool)
+        self.categorical = np.zeros(self.k, dtype = np.bool)
+        self.values = np.zeros(self.k, dtype = np.float64)
+        self.means = np.zeros(self.k, dtype = np.float64)
+        self.stds = np.zeros(self.k, dtype = np.float64)
+        
+        for i in range(self.k):
+            select = np.isfinite(data[:,i])
+            dataslice = data[select,i]
+            
+            # find if we should impute
+            self.hasMissing[i] = not np.all(select)
+            self.valueExists[i] = not np.all(~select)
+            # find what type of imputation
+            searchtill = np.minimum(len(dataslice), 10000)
+            self.categorical[i] = len(np.unique(dataslice[:searchtill])) < 10
+            # record value
+            if self.hasMissing[i] and self.valueExists[i]:
+                if self.categorical[i]:
+                    self.values[i] = mode(dataslice)
+                else:
+                    self.values[i] = np.median(dataslice)
+            
+            if self.valueExists[i] and not self.categorical[i]:
+                self.means[i] = np.mean(dataslice)
+                std = np.std(dataslice)
+                std = 1 if std == 0 else std
+                self.stds[i] = std
+    
+    def transform(self, data):
+        for i in range(self.k):
+            if self.hasMissing[i] and self.valueExists[i]:
+                select = np.isfinite(data[:,i])
+                data[~select,i] = self.values[i]
+            if self.valueExists[i] and not self.categorical[i]:
+                data[:,i] = (data[:,i]- self.means[i])/self.stds[i]
+        return data
+    
+    def fit_transform(self, data):
+        self.fit(data)
+        return self.transform(data)
+        
+        
+# this is done 1 column at a time to prevent memoryerrors in huge datasets
+def imputeMeans(data):
+    for i in tqdm(range(np.shape(data)[1])):
+        select = np.isfinite(data[:,i])
+        needsImpute = not np.all(select)
+        meanExists = np.any(select)
+        if needsImpute and meanExists:
+            mean = np.mean(data[select,i])
+            data[~select,i] = mean
+        if not meanExists and needsImpute:
+            raise ValueError('Column ', str(i), ' is fully missing.  Imputing 0s')
+    return data
+
+
+def standardize(data):
+    for i in tqdm(range(np.shape(data)[1])):
+        mean = np.mean(data[:,i])
+        std = np.std(data[:,i], axis = 0)
+        if std == 0:
+            std == 1
+        data[:,i] = (data[:,i]- mean)/std
+    return data
 
 
 def oneHot(data, prefix = None):
@@ -66,11 +137,18 @@ def convertISO8601(data, includeSec = False):
     m = len(data)
     newTime = np.zeros(m, dtype = data.dtype)
     lastTimeIndex = 16 if includeSec else 13
+    select = ~(data.astype(np.str) == 'nan')
     for i in range(m):
-        current = data[i]
-        date = '20' + current[5:7] + '-' + monthDict[current[2:5]] + '-' + current[:2]
-        time = current[8:lastTimeIndex]
-        newTime[i] = date + 'T' + time
+        if select[i]:
+            current = data[i]
+            try:
+                date = '20' + current[5:7] + '-' + monthDict[current[2:5]] + '-' + current[:2]
+                time = current[8:lastTimeIndex]
+                newTime[i] = date + 'T' + time
+            except (TypeError, KeyError):
+                raise TypeError('Bad argument: ' + str(current)) 
+        else:
+            newTime[i] = ''
     return newTime.astype(np.datetime64)
 
 def stringCollapse(data, collapseList, newVal, inverse = False):
@@ -84,7 +162,7 @@ def stringCollapse(data, collapseList, newVal, inverse = False):
     select = np.zeros((len(data), len(collapseList)), dtype = np.bool)
     arr = data.astype(np.str)
     for i, val in enumerate(collapseList):
-        select[:,i] = arr == val
+        select[:,i] = arr == str(val)
     select = np.any(select, axis = 1)
     
     if inverse:
@@ -99,13 +177,13 @@ def stringCollapse(data, collapseList, newVal, inverse = False):
 # It was written a while ago
 # Make the functions into classes in a scikit-learn style
 
-
-def standardize(data, train_index, exclude = []):
-    vars_to_standardize = list(set(data.columns) - set(data.columns[data.dtypes == np.bool]) - set(exclude))
-    scaler = StandardScaler()
-    data.loc[train_index, vars_to_standardize] = scaler.fit_transform(data.loc[train_index, vars_to_standardize])
-    data.loc[~train_index, vars_to_standardize] = scaler.transform(data.loc[~train_index, vars_to_standardize])
-    return data
+#
+#def standardize(data, train_index, exclude = []):
+#    vars_to_standardize = list(set(data.columns) - set(data.columns[data.dtypes == np.bool]) - set(exclude))
+#    scaler = StandardScaler()
+#    data.loc[train_index, vars_to_standardize] = scaler.fit_transform(data.loc[train_index, vars_to_standardize])
+#    data.loc[~train_index, vars_to_standardize] = scaler.transform(data.loc[~train_index, vars_to_standardize])
+#    return data
 
 
 

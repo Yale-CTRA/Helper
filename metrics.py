@@ -251,5 +251,175 @@ def bars(IDs, U, Y, T, bins = 5):
     ax.set_ylim([0.85, 0.98])
     ax.legend((rects1[0], rects2[0]), ('Treated', 'Control'))
     plt.show()
+    
+    
+    
+class TimeEvaluator(object):
+    def __init__(self, pIndex, Y, P, T, upper = 52, lower = 0, boundaries = None, 
+                 n_bins = 100, modelName = ''):
+        self.pIndex = pIndex
+        self.Y = self.makeBool(Y)
+        self.P = P
+        self.T = T
+        self.upper, self.lower = upper, lower
+        self.n_bins = n_bins if boundaries is None else len(boundaries)-1
+        self.modelName = modelName
+        
+        ### create usefulvars
+        if boundaries is None:
+            self.boundaries = self.makeBoundaries()
+        else:
+            self.boundaries = np.array(boundaries) if type(boundaries) is list else boundaries
+        self.nEvents = self.countEvents()
+        
+        # record informaton
+        self.lead = np.full((len(pIndex), self.n_bins+1), np.nan, dtype = np.float64)
+        self.TPselect = np.zeros(self.lead.shape, dtype = np.bool)
+        self.confusion = np.zeros((2, 2, self.n_bins+1), dtype = np.int64)
+        self.record()
+        self.medTPlead = np.full(self.n_bins+1, np.nan, dtype = np.float64)
+        if self.n_bins > 0:
+            for j in range(self.n_bins):
+                self.medTPlead[j] = np.median(self.lead[self.TPselect[:,j],j])
+        else:
+            self.medTPlead[0] = np.median(self.lead[self.TPselect[:,0],0])
+        
+        
+        # get statistics over confusion matrix
+        with np.warnings.catch_warnings():
+            np.warnings.filterwarnings('ignore', r'invalid value encountered in true_divide')
+            self.TPR = self.confusion[1,1,:] / (self.confusion[1,1,:] + self.confusion[1,0,:])
+            self.FNR = 1  - self.TPR
+            self.FPR = self.confusion[0,1,:] / (self.confusion[0,0,:] + self.confusion[0,1,:])
+            self.TNR = 1 - self.FPR
+            self.PPV = self.confusion[1,1,:] / (self.confusion[1,1,:] + self.confusion[0,1,:])
+            self.FDR = 1- self.PPV
+            self.NPV = self.confusion[0,0,:] / (self.confusion[0,0,:] + self.confusion[1,0,:])
+            self.FOR = 1 - self.NPV
+            self.ACC = (self.confusion[0,0,:] + self.confusion[1,1,:])
+            self.ACC = self.ACC/(self.ACC + self.confusion[0,1,:] + self.confusion[1,0,:])
+        
+        
+        self.fullNames = ['true positive rate', 'true negative rate', 'false positive rate',
+                          'false negative rate', 'positive predictive value', 
+                          'negative predictive value', 'false discovery rate', 
+                          'false omission rate', 'recall', 'precision', 'sensitivity',
+                          'specificity', 'selectivity', 'miss rate', 'hit rate', 'fallout',
+                          'accuracy']
+        
+        self.abbreviate = {'true positive rate': 'tpr', 'true negative rate':'tnr',
+                            'false positive rate': 'fpr', 'false negative rate': 'fnr',
+                            'positive predictive value': 'ppv', 'negative predictive value': 'npv',
+                            'false discovery rate': 'fdr', 'false omission rate': 'for', 
+                            'recall': 'tpr', 'precision': 'ppv', 'sensitivity': 'tpr',
+                            'specificity': 'tnr', 'selectivity': 'tnr', 'miss rate': 'fnr', 
+                            'hit rate': 'tpr', 'fallout': 'fpr', 'accuracy': 'acc'}
+                                 
+        self.map = {'tpr': self.TPR, 'tnr': self.TNR, 'fpr': self.FPR,'fnr': self.FNR,
+                    'ppv': self.PPV, 'npv': self.NPV, 'fdr': self.FDR, 'for': self.FOR,
+                    'acc': self.ACC, 'lead': self.medTPlead}
+    
+    def translate(self, string):
+        string = string.lower()
+        key = self.abbreviate[string.lower()] if string in self.fullNames else string
+        return self.map[key]
+    
+    def __getitem__(self, string):
+        return self.translate(string)
+    
+    def makeBool(self, Z):
+        Z = Z if Z.dtype is np.dtype('bool') else Z==1 # convert to boolean if necessary
+        return Z
+    
+    def makeBoundaries(self):
+        EPSILON = 1e-7
+        boundaries = np.percentile(self.P[self.Y], 100*np.arange(0,self.n_bins+1)/self.n_bins)
+        boundaries[0], boundaries[-1] = -EPSILON, 1+EPSILON
+        return boundaries
+    
+    def countEvents(self):
+        counter = 0
+        for i in range(len(self.pIndex)):
+            start, stop, _ = self.pIndex[i,:]
+            if np.any(self.Y[start:stop]):
+                counter +=1
+        return counter
+
+
+    def record(self):
+        # record where predictions cross decision boundaries using broadcasting
+        crossings = self.P[np.newaxis,:] > self.boundaries[:,np.newaxis]
+        # loop through encounters; add 1 to each confusion matrix per encounter
+        for i in range(len(self.pIndex)):
+            start, stop, length = self.pIndex[i,:]
+            AKI = np.any(self.Y[start:stop])
+            # restrict rows we examine for those who had AKI btw [upper,lower] hours pre-AKI
+            stop, start = start + length - np.searchsorted(self.T[start:stop][::-1],
+                                        [self.lower, self.upper]) if AKI else (stop, start)
+            # classify crossings
+            if stop - start > 0:
+                positive = np.any(crossings[:,start:stop], axis = 1)
+                where = np.argmax(crossings[:,start:stop], axis = 1)
+                self.lead[i, positive] = self.T[start + where[positive]]
+                if AKI:
+                    self.TPselect[i,:] = positive
+                    positive = positive.astype(np.int64)
+                    self.confusion[1,1,:] += positive # True Positives (TP)
+                    self.confusion[1,0,:] += 1 - positive # False Negatives (FN)
+                else:
+                    positive = positive.astype(np.int64)
+                    self.confusion[0,1,:] += positive # False Positives (FP)
+                    self.confusion[0,0,:] += 1 - positive # True Negatives (TN)
+    
+    
+    def auc(self, plot = True):
+        if plot:
+            fig, ax = plt.subplots()
+            ax.plot(self.FPR, self.TPR, 'b', linewidth = 1.5)
+            ax.plot([0,1], [0,1], 'k', linewidth = 0.5, linestyle = '--')
+            ax.set_xlabel('False Positive Rate', fontsize=18)
+            ax.set_ylabel('True Positive Rate', fontsize=18)
+            ax.tick_params(labelsize = 14)
+            plt.show()
+        return np.round(-np.trapz(self.TPR, x = self.FPR), 3) 
+    
+    def restrict(self, y, x, xrange):
+        select = np.isfinite(y)
+        y, x = y[select], x[select]
+        if xrange is not None:
+            select = np.logical_and(xrange[0] <= x,x <= xrange[1])
+            y, x = y[select], x[select]
+        if len(y) == 1:
+            y = np.array([y[0], y[0]])
+            x = np.array([0, 1]) if xrange is None else np.array(xrange)
+        return y, x
+    
+    def plot(self, axis1, axis2 = None, xrange = None, compareto = None):
+        fontsize = 24
+        
+        fig, ax1 = plt.subplots()
+        y1a, x1a = self.restrict(self[axis1], self.boundaries, xrange = xrange)
+        ax1.plot(x1a, y1a, 'b-', label = self.modelName, linewidth = 1.5)
+        if compareto is not None:
+            y1b, x1b = self.restrict(compareto[axis1], compareto.boundaries, xrange = xrange)
+            ax1.plot(x1b, y1b, 'b--', label = compareto.modelName)
+        ax1.legend()
+        ax1.set_xlabel('decision boundaries', fontsize=fontsize)
+        ax1.set_ylabel(axis1, color = 'b', fontsize=fontsize)
+        # Make the y-axis label, ticks and tick labels match the line color.
+        ax1.tick_params('y', colors='b', labelsize = 18)
+        
+        if axis2 is not None:
+            y2, x2 = self.restrict(self[axis2], self.boundaries, xrange = xrange)
+            ax2 = ax1.twinx()
+            ax2.plot(x2, y2, 'r-', linewidth = 1.5)
+            if compareto is not None:
+                y2b, x2b = self.restrict(compareto[axis2], compareto.boundaries, xrange = xrange)
+                ax2.plot(x2b, y2b, 'r--')
+            ax2.set_ylabel(axis2, color='r', fontsize=fontsize)
+            ax2.tick_params('y', colors='r', labelsize = 18)
+
+        plt.show()
+        
 
     

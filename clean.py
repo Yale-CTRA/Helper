@@ -25,16 +25,14 @@ def removeNaNColumns(data):
 ## returns boolean array describing which variables are boolean
 def isBool(df, varList = None):
     varList = list(df.columns) if varList is None else varList
-    k = np.repeat(False, len(df)) # search restriction for large datasets to be faster
-    k[:min(len(df), 100000)] = True
-    return np.array([len(np.unique(df.loc[np.logical_and(np.isfinite(df[var].values),k),var])) <= 2 
+    return np.array([df.loc[np.isfinite(df[var].values),var].nunique() <= 2 
                          for var in varList], dtype = np.bool)
 
 ## returns boolean array describing which variables are integers
 def isInt(df, varList = None):
     df.fillna(0, inplace = True) # prevents error during comparison
     varList = varList if not None else list(df.columns)
-    k = min(len(df), 100000) # search restriction for large datasets to be faster
+    k = min(len(df), 1000000) # search restriction for large datasets to be faster
     return np.array([np.all(df[var].iloc[:k].values == df[var].iloc[:k].values.astype(np.int)) for var in varList], dtype = np.bool)
 
 
@@ -103,31 +101,34 @@ def compress(data):
     
 def mixed2float(data):
     m = len(data)
-    newData = np.zeros(m, dtype = np.float16)
+    newData = np.empty(m, dtype = np.float32)
+    newData.fill(np.nan)
     manyMarker = np.zeros(m, dtype = np.bool)
+    select = ~(data.astype(np.str) == 'nan')
     
     for i in range(m):
-        try:     # if number is already essentially in float format
-            val = float(data[i])
-            newData[i] = val
-        except ValueError:     # some quirk with string
-            # checks for large number commas, comparisons for v small and large measurements, etc.
-            string = re.sub('[ ,+>=]', '', data[i].lower()).replace('..','.')
-            # checks for dashes to indicate ranges (e.g. 10-20)
-            dashLoc = string.find('-')
-            try:
-                if string in ['none', 'notdetected'] or '<' in string: # all less thans are 0
-                    newData[i] = 0
-                elif string == 'many':  # mark to impute largest value later
-                    manyMarker[i] = True
-                elif dashLoc != -1:      # check for dashes; if so, average interval
-                    val = (float(string[:dashLoc]) + float(string[dashLoc+1:]))/2
-                    newData[i] = val
-                else:           # can string be converted with just bad chars removed?
-                    val = float(string)
-                    newData[i] = val
-            except ValueError:      # no hope. code as NaN (e.g. cancelled, unavilable, etc.)
-                newData[i] = np.nan
+        if select[i]:
+            try:     # if number is already essentially in float format
+                val = float(data[i])
+                newData[i] = val
+            except ValueError:     # some quirk with string
+                # checks for large number commas, comparisons for v small and large measurements, etc.
+                string = re.sub('[ ,+>=]', '', data[i].lower()).replace('..','.')
+                # checks for dashes to indicate ranges (e.g. 10-20)
+                dashLoc = string.find('-')
+                try:
+                    if string in ['none', 'notdetected'] or '<' in string: # all less thans are 0
+                        newData[i] = 0
+                    elif string == 'many':  # mark to impute largest value later
+                        manyMarker[i] = True
+                    elif dashLoc != -1:      # check for dashes; if so, average interval
+                        val = (float(string[:dashLoc]) + float(string[dashLoc+1:]))/2
+                        newData[i] = np.round(val, decimals = 2)
+                    else:           # can string be converted with just bad chars removed?
+                        val = float(string)
+                        newData[i] = np.round(val, decimals = 2)
+                except ValueError:      # no hope. code as NaN (e.g. cancelled, unavilable, etc.)
+                    newData[i] = np.nan
     
     if np.any(manyMarker):
         maxVal = np.max(newData[np.isfinite(newData)])

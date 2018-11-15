@@ -10,8 +10,20 @@ import pickle
 import os
 import pandas as pd
 import numpy as np
+import time
+from tqdm import tqdm
 
 
+flatten = lambda l: [item for sublist in l for item in sublist]
+
+def timer(func, *args, iters = 100):
+    elapsed = 0
+    for i in tqdm(range(iters)):
+        start = time.time()
+        func(*args)
+        end = time.time()
+        elapsed += end - start
+    print("Avg time:", round(1000*elapsed/iters, 3), "ms")
 
 ## Wrappers for pickling.  Just makes saving/loading objects a little less verbose
 
@@ -33,7 +45,11 @@ def getHrsMins(time):
     text = str(hours) + ' hrs ' + str(minutes) + ' mins'
     return text
 
-
+## search for substring within patient columns
+def searchColumns(names, query):
+    match = np.array([query.lower() in name.lower() for name in list(names)])
+    return names[match]
+    
 
 ## Used for linear models
 ## takes a list of predictors and associated coefficients
@@ -54,7 +70,7 @@ def showCoef(coef, predictors):
     
     # pair and sort pairs by coef size
     toPrint = list((zip(predictors, coef)))
-    sortIndex = np.argsort(coef)
+    sortIndex = np.argsort(coef)[::-1]
     toPrint = np.array(toPrint)[sortIndex]
     
     # print to console
@@ -66,23 +82,29 @@ def showCoef(coef, predictors):
 
 
 # saves a file of the unique values for the columns given in a dataset
-def saveUnique(data, names, folder, fileName, maxRecord = 1000):
+def saveUnique(data, names, folder, fileName, maxRecord = 1000, verbose = True):
     df_unique = pd.DataFrame(np.empty((maxRecord, len(names)), dtype = np.dtype('O')),
                              columns = names, index = np.arange(maxRecord))
     
-    df_counts = pd.DataFrame(np.empty((maxRecord, len(names)), dtype = np.int64),
+    df_counts = pd.DataFrame(np.zeros((maxRecord, len(names)), dtype = np.int64),
                              columns = names, index = np.arange(maxRecord))
     
     for var in names:
-        select = ~(data[var].astype(np.str) == 'nan')
-        vals, counts = np.unique(data[var].values[select], return_counts=False)
+        select = ~(data[var].astype(np.str).values == 'nan')
+        dataRecorded = data[var].values[select]
+        try:
+            vals, counts = np.unique(dataRecorded, return_counts = True)
+        except TypeError:
+            dataRecorded = dataRecorded.astype(np.str)
+            vals, counts = np.unique(dataRecorded, return_counts = True)
         maxLen = min(len(vals), maxRecord)
         sorter = np.argsort(counts)[::-1][:maxLen]
         vals, counts = vals[sorter], counts[sorter]
         loc = df_unique.columns.get_loc(var)
         df_unique.iloc[:maxLen, loc] = vals
         df_counts.iloc[:maxLen, loc] = counts
-        print(var)
+        if verbose:
+            print(var)
     df_unique.to_csv(os.path.join(folder, fileName + '_unique.csv'))
     df_counts.to_csv(os.path.join(folder, fileName + '_counts.csv'))
 
@@ -119,6 +141,32 @@ def classVariableTransform(Y, T, soft = False, margin = None, side = 'both'):
         
     return np.array(Z, dtype = np.float32)
 
+def getPatientIndices(data):
+    """
+    Input: 1-d numpy array of patient encounter IDs that is total length of data (repeats necessary)
+    Output: (k x 3) matrix, X, where 1st and 2nd columns are start and stop indices, 
+            third column is number of timestamps, and k is num encounters
+    Usage for jth patient: data.iloc[ X[j,0]:X[j,1] , : ]
+    """
+    m = len(data)
+    X = np.zeros((len(np.unique(data)), 3), dtype = np.int64)
+    
+    #fix boundaries
+    X[0,0] = 0
+    X[-1,1] = m
+
+    # do loop to record indices
+    counter = 0
+    current = data[0]
+    for i in range(1,m):
+        if data[i] != current:
+            current = data[i]
+            X[counter,1] = i
+            X[counter+1,0] = i
+            counter += 1
+
+    X[:,2] = X[:,1] - X[:,0]
+    return X
 
 
 """
