@@ -14,7 +14,8 @@ import time
 from tqdm import tqdm
 
 
-flatten = lambda l: [item for sublist in l for item in sublist]
+flatten = lambda original: [item for sublist in original for item in sublist]
+
 
 def timer(func, *args, iters = 100):
     elapsed = 0
@@ -27,13 +28,13 @@ def timer(func, *args, iters = 100):
 
 ## Wrappers for pickling.  Just makes saving/loading objects a little less verbose
 
-def save(obj, loc, name):
+def save(obj, folder, name):
     name += '.pickle'
-    with open(os.path.join(loc, name), 'wb') as output:
+    with open(os.path.join(folder, name), 'wb') as output:
         pickle.dump(obj, output, -1)
-def load(loc, name):
+def load(folder, name):
     name += '.pickle'
-    with open(os.path.join(loc, name), 'rb') as input:
+    with open(os.path.join(folder, name), 'rb') as input:
         obj = pickle.load(input)
         return obj
     
@@ -45,7 +46,7 @@ def getHrsMins(time):
     text = str(hours) + ' hrs ' + str(minutes) + ' mins'
     return text
 
-## search for substring within patient columns
+## search for substring query within names array
 def searchColumns(names, query):
     match = np.array([query.lower() in name.lower() for name in list(names)])
     return names[match]
