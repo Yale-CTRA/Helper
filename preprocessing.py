@@ -22,9 +22,93 @@ from Helper.clean import mixedCategoricalClean, mixed2float
 
 from sklearn.preprocessing import StandardScaler
 
-# assumes numpy array of all numerical types
+class Splitter(object):
+    """
+    Splits data into training, val, test, whatever sets based on proportions arg
+    proportion arg should sum to 1 and its length should correspond to how many sets you want
+    random arg specifies if you want to initialize on a random split
+    Holds splitting info in memory so sequential calls to split are aligned
+    Can create new splits (partial refresh) by using shuffle method
+    """
+    def __init__(self, proportions, random = True):
+        self.setProportions(proportions)
+        self.shuffleBool = random
+        self.n = None
+        self.select = None
+        
+    def split(self, *data):
+        
+        # set up stuff for multiple or single inputs
+        if len(data) > 1:
+            singleInput = False
+            n = len(data[0])
+            # make sure all data provided is same length in first dim
+            assert np.all(tuple(len(D) == n for D in data))
+        else:
+            singleInput = True
+            data = data[0]
+            n = len(data)
+        
+        # first time init else assert data is same length as previously established
+        if self.needsInit:
+            self.n = n
+            self.select = self.generateSelector() # returns unshuffled
+            if self.shuffleBool:
+                self.shuffle()
+            self.needsInit = False
+        else:
+            assert self.n == n
+        
+        # return split data for single or multiple inputs
+        if singleInput:
+            return tuple(data[self.select == i,...] for i in range(self.k))
+        else:
+            return tuple(tuple(D[self.select == i,...] for D in data) for i in range(self.k))
+        
+    def generateSelector(self):
+        ## fill select with value i for ith partition
+        ## note 0's are filled in already, so iterator starts at 1
+        select = np.zeros(self.n, dtype = np.int8)
+        for i in range(1, self.k):
+            start = int(np.round(self.props[i-1]*self.n))
+            stop = int(np.round(self.props[i]*self.n))
+            select[start:stop] = i
+        return select
+    
+    def shuffle(self):
+        np.random.shuffle(self.select)
+    
+    def setProportions(self, proportions):
+        TINY = 1e-5
+        assert 1 - TINY <= sum(proportions) <= 1 + TINY
+        self.props = np.cumsum(proportions)
+        self.k = len(proportions)
+        assert self.k >= 2
+        self.needsInit = True
+        
+
+############ example usage
+#X = data[features].values
+#Y = data[outcome].values
+#proportions = [0.7, 0.3]
+#splitter = Splitter(proportions, random = True)
+### use either
+#(Xtrain, Ytrain), (Xtest, Ytest) = splitter.split(X, Y)
+### or
+#Xtrain, Xtest = splitter.split(X)
+#Ytrain, Ytest = splitter.split(Y)
+
+
 class Transformer(object):
+    """
+    Imputes using medians/modes (categoricals auto-inferred)
+    Scales non-categoricals to similar ranges using regular standarization 
+            (will upgrade to robust in future)
+    """
     def fit(self, data):
+        ## input data should be a numpy ndarray
+        
+        # recorded stats/information from each of k features
         self.k = np.shape(data)[1]
         self.hasMissing = np.zeros(self.k, dtype = np.bool)
         self.valueExists = np.zeros(self.k, dtype = np.bool)
@@ -37,19 +121,22 @@ class Transformer(object):
             select = np.isfinite(data[:,i])
             dataslice = data[select,i]
             
-            # find if we should impute
+            # find if we should impute at all
+            # by examining if everything or nothing recorded
             self.hasMissing[i] = not np.all(select)
             self.valueExists[i] = not np.all(~select)
-            # find what type of imputation
-            searchtill = np.minimum(len(dataslice), 10000)
+            # find out if categorical variable
+            searchtill = np.minimum(len(dataslice), 20000)
             self.categorical[i] = len(np.unique(dataslice[:searchtill])) < 10
-            # record value
+            
+            # record mode for categoricals and medians for everything else
             if self.hasMissing[i] and self.valueExists[i]:
                 if self.categorical[i]:
                     self.values[i] = mode(dataslice)
                 else:
                     self.values[i] = np.median(dataslice)
             
+            # record means and stds for non-categoricals
             if self.valueExists[i] and not self.categorical[i]:
                 self.means[i] = np.mean(dataslice)
                 std = np.std(dataslice)
@@ -58,7 +145,7 @@ class Transformer(object):
     
     def transform(self, data):
         for i in range(self.k):
-            if self.hasMissing[i] and self.valueExists[i]:
+            if self.hasMissing[i] and self.valueExists[i]: # should impute?
                 select = np.isfinite(data[:,i])
                 data[~select,i] = self.values[i]
             if self.valueExists[i] and not self.categorical[i]:
@@ -70,28 +157,6 @@ class Transformer(object):
         return self.transform(data)
         
         
-# this is done 1 column at a time to prevent memoryerrors in huge datasets
-def imputeMeans(data):
-    for i in tqdm(range(np.shape(data)[1])):
-        select = np.isfinite(data[:,i])
-        needsImpute = not np.all(select)
-        meanExists = np.any(select)
-        if needsImpute and meanExists:
-            mean = np.mean(data[select,i])
-            data[~select,i] = mean
-        if not meanExists and needsImpute:
-            raise ValueError('Column ', str(i), ' is fully missing.  Imputing 0s')
-    return data
-
-
-def standardize(data):
-    for i in tqdm(range(np.shape(data)[1])):
-        mean = np.mean(data[:,i])
-        std = np.std(data[:,i], axis = 0)
-        if std == 0:
-            std == 1
-        data[:,i] = (data[:,i]- mean)/std
-    return data
 
 
 def oneHot(data, prefix = None):
