@@ -38,7 +38,7 @@ class Splitter(object):
         
     def split(self, *data):
         
-        # set up stuff for multiple or single inputs
+        # set-up for multiple or single inputs
         if len(data) > 1:
             singleInput = False
             n = len(data[0])
@@ -46,10 +46,11 @@ class Splitter(object):
             assert np.all(tuple(len(D) == n for D in data))
         else:
             singleInput = True
-            data = data[0]
+            data = data[0] # remove tuple wrapping
             n = len(data)
         
-        # first time init else assert data is same length as previously established
+        # first-time init for self args n and select
+        # else assert data is same length as previously established
         if self.needsInit:
             self.n = n
             self.select = self.generateSelector() # returns unshuffled
@@ -91,7 +92,7 @@ class Splitter(object):
 #X = data[features].values
 #Y = data[outcome].values
 #proportions = [0.7, 0.3]
-#splitter = Splitter(proportions, random = True)
+#splitter = Splitter(proportions)
 ### use either
 #(Xtrain, Ytrain), (Xtest, Ytest) = splitter.split(X, Y)
 ### or
